@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="no">
+<meta name="theme-color" content="#0e0f12">
+<title>Web PPG</title>
+<style>
+  :root {
+    --bg: #0e0f12; --panel: #17191e; --line: #2a2d35; --text: #eceef2; --muted: #8b909c;
+    --accent: #ff4d5e; --ok: #3ecf8e; --warn: #f5b74a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-text-size-adjust: 100%; }
+  body { padding: calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 16px); }
+  main { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+  header { display: flex; align-items: center; justify-content: space-between; }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  .pill { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--panel); color: var(--muted); border: 1px solid var(--line); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  .hero { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+  .bpm { font-size: 64px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+  .bpm small { font-size: 16px; color: var(--muted); font-weight: 500; margin-left: 4px; letter-spacing: 0; }
+  .heart { display: inline-block; color: var(--accent); transition: transform .08s ease-out; }
+  .heart.beat { transform: scale(1.35); }
+  #status { font-size: 14px; color: var(--muted); margin-top: 6px; min-height: 20px; }
+  #status.ok { color: var(--ok); } #status.warn { color: var(--warn); } #status.err { color: var(--accent); }
+  .preview { width: 84px; height: 84px; border-radius: 12px; overflow: hidden; background: #000; position: relative; border: 1px solid var(--line); }
+  .preview video { width: 100%; height: 100%; object-fit: cover; }
+  .preview .sw { position: absolute; inset: auto 0 0 0; height: 14px; }
+  canvas#wave { width: 100%; height: 150px; display: block; }
+  .qual { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .bar { flex: 1; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .3s, background .3s; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+  .stats div { font-variant-numeric: tabular-nums; }
+  .stats b { display: block; font-size: 17px; }
+  .stats span { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  button, select, input[type=text] {
+    font: inherit; color: var(--text); background: #22252c; border: 1px solid var(--line);
+    border-radius: 10px; padding: 11px 14px; }
+  button { cursor: pointer; flex: 1; min-width: 0; font-weight: 600; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.rec { background: #fff; color: #111; border-color: #fff; }
+  button.recording { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .4; }
+  select { flex: 1; min-width: 0; width: 100%; -webkit-appearance: none; appearance: none; }
+  label.lbl { font-size: 12px; color: var(--muted); display: block; margin: 0 0 4px 2px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  pre { white-space: pre-wrap; word-break: break-word; font-size: 11px; color: var(--muted); margin: 8px 0 0; max-height: 220px; overflow: auto; }
+  .hint { font-size: 13px; color: var(--muted); }
+  .hint ol { margin: 6px 0 0; padding-left: 20px; }
+  .hidden { display: none !important; }
+  #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%);
+    background: #fff; color: #111; padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Web PPG</h1>
+    <span class="pill" id="fpsPill">idle</span>
+  </header>
+
+  <section class="panel hero">
+    <div>
+      <div class="bpm"><span class="heart" id="heart">♥</span> <span id="bpm">--</span><small>bpm</small></div>
+      <div id="status">Tap Start, then cover the back camera and flash with a fingertip.</div>
+    </div>
+    <div class="preview"><video id="video" playsinline muted autoplay></video><div class="sw" id="swatch"></div></div>
+  </section>
+
+  <section class="panel">
+    <canvas id="wave"></canvas>
+    <div class="qual">Signal <div class="bar"><i id="qbar"></i></div><span id="qtxt">–</span></div>
+  </section>
+
+  <section class="panel stats">
+    <div><b id="sBeats">0</b><span>beats</span></div>
+    <div><b id="sRmssd">–</b><span>RMSSD ms</span></div>
+    <div><b id="sTime">0:00</b><span>recorded</span></div>
+    <div><b id="sTorch">–</b><span>torch</span></div>
+  </section>
+
+  <section class="row">
+    <button class="primary" id="btnStart">Start camera</button>
+    <button id="btnTorch" disabled>Torch</button>
+  </section>
+
+  <section class="panel">
+    <div class="grid2">
+      <div>
+        <label class="lbl" for="dur">Recording length</label>
+        <select id="dur">
+          <option value="30">30 s</option>
+          <option value="60" selected>60 s</option>
+          <option value="120">2 min</option>
+          <option value="300">5 min</option>
+          <option value="0">Until stopped</option>
+        </select>
+      </div>
+      <div>
+        <label class="lbl" for="cam">Camera</label>
+        <select id="cam" disabled><option>—</option></select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="rec" id="btnRec" disabled>Record</button>
+    </div>
+  </section>
+
+  <section class="panel hidden" id="exportPanel">
+    <div class="hint" id="exportSummary"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnShare">Share / Save</button>
+      <button id="btnCsv">CSV</button>
+      <button id="btnJson">JSON</button>
+      <button id="btnCopy">Copy CSV</button>
+    </div>
+    <div style="margin-top:10px">
+      <label class="lbl" for="endpoint">Optional: POST JSON to URL</label>
+      <div class="row">
+        <input type="text" id="endpoint" placeholder="https://your-server.example/ppg" style="flex:3;min-width:0" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="btnPost" style="flex:1">Send</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel hint">
+    <b style="color:var(--text)">How to measure</b>
+    <ol>
+      <li>Rest your fingertip lightly over the main back lens <i>and</i> the flash. Don't press hard, which squeezes the blood out.</li>
+      <li>Keep your hand still and supported (e.g. phone flat on a table).</li>
+      <li>Wait for “Good signal”, then tap Record.</li>
+    </ol>
+    <p style="margin:8px 0 0">The flash gets warm on long recordings. This is a research and demo tool, not a medical device.</p>
+  </section>
+
+  <details class="panel">
+    <summary>Diagnostics</summary>
+    <pre id="diag">—</pre>
+  </details>
+</main>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ============================== DSP ============================== */
+const FS = 30;                 // uniform resampling rate (Hz)
+const DT = 1 / FS;
+
+function biquad(type, f0, fs, Q = Math.SQRT1_2) {
+  const w0 = 2 * Math.PI * f0 / fs, c = Math.cos(w0), a = Math.sin(w0) / (2 * Q);
+  let b0, b1, b2;
+  if (type === "lp") { b0 = (1 - c) / 2; b1 = 1 - c; b2 = (1 - c) / 2; }
+  else { b0 = (1 + c) / 2; b1 = -(1 + c); b2 = (1 + c) / 2; }
+  const a0 = 1 + a, a1 = -2 * c, a2 = 1 - a;
+  const B0 = b0 / a0, B1 = b1 / a0, B2 = b2 / a0, A1 = a1 / a0, A2 = a2 / a0;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  return {
+    step(x) { const y = B0 * x + B1 * x1 + B2 * x2 - A1 * y1 - A2 * y2; x2 = x1; x1 = x; y2 = y1; y1 = y; return y; },
+    reset() { x1 = x2 = y1 = y2 = 0; }
+  };
+}
+
+/** Streaming pipeline: irregular camera samples -> 30 Hz grid -> band-pass 0.6–4 Hz -> peaks. */
+function createPipeline() {
+  const hp1 = biquad("hp", 0.6, FS), hp2 = biquad("hp", 0.6, FS);
+  const lp1 = biquad("lp", 4.0, FS), lp2 = biquad("lp", 4.0, FS);
+  const BUF = FS * 12;
+  const buf = new Float32Array(BUF);   // filtered ring buffer (last 12 s)
+  const tbuf = new Float64Array(BUF);
+  let n = 0;                           // total samples emitted
+  let lastT = null, lastV = null, nextT = null, x0 = null;
+  let warm = 0;                        // samples since reset (filter settling)
+  const peaks = [];                    // peak times (s)
+  let lastPeakT = -1e9;
+  let y1 = 0, y2 = 0;                  // previous two filtered values
+
+  function reset() {
+    hp1.reset(); hp2.reset(); lp1.reset(); lp2.reset();
+    lastT = lastV = nextT = x0 = null; warm = 0; y1 = y2 = 0;
+  }
+
+  function recentMax(seconds) {
+    const k = Math.min(n, Math.round(seconds * FS)); let m = 0;
+    for (let i = 1; i <= k; i++) { const v = Math.abs(buf[(n - i) % BUF]); if (v > m) m = v; }
+    return m;
+  }
+
+  function emit(t, v) {
+    if (x0 === null) x0 = v;
+    let y = hp2.step(hp1.step(v - x0));
+    y = lp2.step(lp1.step(y));
+    warm++;
+    buf[n % BUF] = y; tbuf[n % BUF] = t; n++;
+    // Peak detection on y1 (local max), after filters have settled (~2 s).
+    if (warm > FS * 2 && y1 > y2 && y1 >= y) {
+      const thr = 0.35 * recentMax(3);
+      const tp = t - DT;
+      if (y1 > thr && y1 > 0) {
+        // parabolic interpolation for sub-sample timing
+        const den = y2 - 2 * y1 + y;
+        const off = den !== 0 ? 0.5 * (y2 - y) / den : 0;
+        const tPeak = tp + Math.max(-0.5, Math.min(0.5, off)) * DT;
+        if (tPeak - lastPeakT >= 0.30) { peaks.push(tPeak); lastPeakT = tPeak; api.onBeat && api.onBeat(tPeak); }
+      }
+    }
+    y2 = y1; y1 = y;
+  }
+
+  /** feed one camera sample: t in seconds, v = PPG value (already inverted so pulses go up). */
+  function push(t, v) {
+    if (lastT !== null && (t - lastT > 0.5 || t <= lastT)) reset();  // gap / dropped frames
+    if (lastT === null) { lastT = t; lastV = v; nextT = Math.ceil(t * FS) / FS; return; }
+    while (nextT <= t) {
+      const a = (nextT - lastT) / (t - lastT);
+      emit(nextT, lastV + a * (v - lastV));
+      nextT += DT;
+    }
+    lastT = t; lastV = v;
+  }
+
+  /** Normalized autocorrelation over last `sec` seconds: {sqi 0..1, bpm} */
+  function autocorr(sec = 8) {
+    const N = Math.min(n, Math.round(sec * FS));
+    if (N < FS * 4) return { sqi: 0, bpm: null };
+    const x = new Float32Array(N);
+    let mean = 0;
+    for (let i = 0; i < N; i++) { x[i] = buf[(n - N + i) % BUF]; mean += x[i]; }
+    mean /= N; let e = 0;
+    for (let i = 0; i < N; i++) { x[i] -= mean; e += x[i] * x[i]; }
+    if (e <= 0) return { sqi: 0, bpm: null };
+    const minLag = Math.round(0.3 * FS), maxLag = Math.round(1.6 * FS);
+    let best = -1, bestLag = 0; const r = [];
+    for (let L = minLag; L <= maxLag; L++) {
+      let s = 0; for (let i = 0; i + L < N; i++) s += x[i] * x[i + L];
+      r[L] = s / e * N / (N - L);
+    }
+    for (let L = minLag + 1; L < maxLag; L++) {
+      if (r[L] > r[L - 1] && r[L] >= r[L + 1] && r[L] > best) { best = r[L]; bestLag = L; }
+    }
+    if (best <= 0) return { sqi: 0, bpm: null };
+    return { sqi: Math.max(0, Math.min(1, best)), bpm: 60 * FS / bestLag };
+  }
+
+  function series(sec) {
+    const k = Math.min(n, Math.round(sec * FS)); const out = new Float32Array(k), ts = new Float64Array(k);
+    for (let i = 0; i < k; i++) { out[i] = buf[(n - k + i) % BUF]; ts[i] = tbuf[(n - k + i) % BUF]; }
+    return { y: out, t: ts };
+  }
+
+  const api = { push, reset, autocorr, series, peaks, onBeat: null, get n() { return n; } };
+  return api;
+}
+
+/** Heart rate from recent beats using median IBI, with outlier rejection. */
+function hrFromPeaks(peaks, now, windowSec = 10) {
+  const p = peaks.filter(t => t > now - windowSec);
+  if (p.length < 4) return null;
+  const ibi = [];
+  for (let i = 1; i < p.length; i++) { const d = p[i] - p[i - 1]; if (d >= 0.3 && d <= 2.0) ibi.push(d); }
+  if (ibi.length < 3) return null;
+  const s = [...ibi].sort((a, b) => a - b), med = s[s.length >> 1];
+  const good = ibi.filter(d => Math.abs(d - med) / med < 0.25);
+  if (good.length < 3) return null;
+  return 60 / (good.reduce((a, b) => a + b, 0) / good.length);
+}
+
+function rmssdFromPeaks(peaks) {
+  const ibi = [];
+  for (let i = 1; i < peaks.length; i++) { const d = peaks[i] - peaks[i - 1]; if (d >= 0.3 && d <= 2.0) ibi.push(d); }
+  if (ibi.length < 5) return null;
+  const s = [...ibi].sort((a, b) => a - b), med = s[s.length >> 1];
+  const good = ibi.filter(d => Math.abs(d - med) / med < 0.25);
+  let sum = 0, k = 0;
+  for (let i = 1; i < good.length; i++) { const d = good[i] - good[i - 1]; sum += d * d; k++; }
+  return k ? Math.sqrt(sum / k) * 1000 : null;
+}
+
+/* ============================== APP ============================== */
+const $ = id => document.getElementById(id);
+const video = $("video");
+const DEMO = location.hash === "#demo";
+
+const state = {
+  stream: null, track: null, torchOn: false, torchSupported: false,
+  t0: 0, pipe: createPipeline(), frames: 0, fpsWin: [],
+  finger: false, fingerSince: 0, locked: false,
+  recording: false, recStart: 0, recDur: 60, rec: null, last: null,
+  sqi: 0, hr: null, useGreen: false, devices: [],
+};
+
+const sampleCanvas = document.createElement("canvas");
+sampleCanvas.width = 40; sampleCanvas.height = 40;
+const sctx = sampleCanvas.getContext("2d", { willReadFrequently: true });
+
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove("show"), 1800); }
+function setStatus(msg, cls = "") { const s = $("status"); s.textContent = msg; s.className = cls; }
+
+/* ---------- camera ---------- */
+function pickBackWide(devices) {
+  // iOS exposes physical lenses ("Back Camera") and virtual multi-lens devices
+  // ("Back Dual Wide Camera", "Back Triple Camera"). Virtual devices can switch
+  // lenses mid-measurement when a finger covers them, so prefer the physical wide lens.
+  const vids = devices.filter(d => d.kind === "videoinput");
+  return vids.find(d => /^back camera$/i.test(d.label.trim()))
+      || vids.find(d => /back|rear|environment/i.test(d.label) && !/ultra|tele|dual|triple|front/i.test(d.label))
+      || null;
+}
+
+async function openCamera(deviceId) {
+  stopCamera();
+  const video_c = deviceId
+    ? { deviceId: { exact: deviceId }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } }
+    : { facingMode: { ideal: "environment" }, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 30 } };
+  const stream = DEMO ? demoStream() : await navigator.mediaDevices.getUserMedia({ video: video_c, audio: false });
+  state.stream = stream; state.track = stream.getVideoTracks()[0];
+  state.track.addEventListener("ended", () => setStatus("Camera stopped (another app or tab took it?)", "err"));
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  state.locked = false;
+  await new Promise(r => setTimeout(r, 300));
+  await setTorch(true);
+}
+
+function stopCamera() {
+  if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+  state.stream = null; state.track = null; state.torchOn = false;
+}
+
+async function setTorch(on) {
+  const tr = state.track; if (!tr) return false;
+  const caps = tr.getCapabilities ? tr.getCapabilities() : {};
+  state.torchSupported = !!caps.torch || DEMO;
+  let ok = false;
+  if (DEMO) ok = true;
+  else {
+    for (const c of [{ advanced: [{ torch: on }] }, { torch: on }]) {
+      try { await tr.applyConstraints(c); ok = true; break; } catch (e) { /* try next form */ }
+    }
+  }
+  // Note: on iOS 18 getSettings().torch can be stale, so track our own state.
+  if (ok) state.torchOn = on;
+  $("sTorch").textContent = ok ? (on ? "on" : "off") : "n/a";
+  $("btnTorch").textContent = state.torchOn ? "Torch off" : "Torch on";
+  if (!ok && on) setStatus("Couldn't turn on the flash here. Try a bright light behind your finger.", "warn");
+  updateDiag();
+  return ok;
+}
+
+async function lockCameraIfPossible() {
+  // Freeze auto-exposure / white balance / focus once a finger is on the lens, so the
+  // camera's own adjustments don't swamp the pulse. Each is tried separately.
+  const tr = state.track; if (!tr || !tr.getCapabilities || DEMO) return;
+  const caps = tr.getCapabilities(), done = [];
+  for (const [k, vals] of [["exposureMode", ["manual", "none"]], ["whiteBalanceMode", ["manual", "none"]], ["focusMode", ["manual", "none"]]]) {
+    const avail = caps[k]; if (!Array.isArray(avail)) continue;
+    const v = vals.find(x => avail.includes(x)); if (!v) continue;
+    try { await tr.applyConstraints({ advanced: [{ [k]: v }] }); done.push(k + "=" + v); } catch (e) {}
+  }
+  if (state.torchOn) setTorch(true);   // some devices drop torch when constraints change
+  state.lockedWith = done; updateDiag();
+}
+
+async function listCameras() {
+  try {
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    state.devices = devs.filter(d => d.kind === "videoinput");
+    const sel = $("cam"); sel.innerHTML = "";
+    state.devices.forEach((d, i) => {
+      const o = document.createElement("option"); o.value = d.deviceId; o.textContent = d.label || ("Camera " + (i + 1)); sel.appendChild(o);
+    });
+    const cur = state.track && state.track.getSettings().deviceId;
+    if (cur) sel.value = cur;
+    sel.disabled = state.devices.length < 2;
+  } catch (e) {}
+}
+
+/* ---------- demo source (synthetic finger video, for testing on desktop) ---------- */
+function demoStream() {
+  const c = document.createElement("canvas"); c.width = 160; c.height = 120;
+  const g = c.getContext("2d"); const t0 = performance.now();
+  const img = g.createImageData(160, 120);
+  let phase = 0, prev = 0;
+  (function draw() {
+    const t = (performance.now() - t0) / 1000, hr = 66 + 6 * Math.sin(t / 7);
+    phase += (t - prev) * hr / 60; prev = t;
+    const ph = phase % 1;
+    const pulse = Math.exp(-((ph - 0.15) ** 2) / 0.006) + 0.35 * Math.exp(-((ph - 0.45) ** 2) / 0.01);
+    const r = 205 - 6 * pulse + 3 * Math.sin(t * 0.4), gg = 28 - 2 * pulse;
+    const d = img.data;
+    for (let i = 0; i < d.length; i += 4) {           // per-pixel sensor-like noise
+      d[i] = r + (Math.random() - 0.5) * 12; d[i + 1] = gg + (Math.random() - 0.5) * 8; d[i + 2] = 18; d[i + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+    requestAnimationFrame(draw);
+  })();
+  return c.captureStream(30);
+}
+
+/* ---------- frame loop ---------- */
+function onFrame(now, meta) {
+  if (!state.stream) return;
+  scheduleFrame();
+  if (video.readyState < 2 || !video.videoWidth) return;
+  // Use the camera's capture timestamp when the browser provides one; otherwise the frame callback time.
+  const ct = meta && Number.isFinite(meta.captureTime) && meta.captureTime > 0 ? meta.captureTime : null;
+  const t = (ct ?? now) / 1000;
+  const vw = video.videoWidth, vh = video.videoHeight, s = Math.min(vw, vh) * 0.5;
+  sctx.drawImage(video, (vw - s) / 2, (vh - s) / 2, s, s, 0, 0, 40, 40);
+  const d = sctx.getImageData(0, 0, 40, 40).data;
+  let R = 0, G = 0, B = 0, R2 = 0; const N = d.length / 4;
+  for (let i = 0; i < d.length; i += 4) { R += d[i]; G += d[i + 1]; B += d[i + 2]; R2 += d[i] * d[i]; }
+  R /= N; G /= N; B /= N;
+  const rStd = Math.sqrt(Math.max(0, R2 / N - R * R));
+  processSample(t, R, G, B, rStd);
+}
+function scheduleFrame() {
+  if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) video.requestVideoFrameCallback(onFrame);
+  else requestAnimationFrame(t => onFrame(t, null));
+}
+
+function processSample(tAbs, R, G, B, rStd) {
+  if (!state.t0) state.t0 = tAbs;
+  const t = tAbs - state.t0;
+  state.frames++;
+  state.fpsWin.push(t); while (state.fpsWin.length && state.fpsWin[0] < t - 2) state.fpsWin.shift();
+
+  // Finger detection: frame is bright, red-dominated and fairly uniform.
+  const finger = R > 60 && R > 1.8 * G && R > 1.8 * B && rStd < 40;
+  if (finger && !state.finger) { state.fingerSince = t; state.pipe.reset(); }
+  state.finger = finger;
+  $("swatch").style.background = `rgb(${R | 0},${G | 0},${B | 0})`;
+
+  // Red usually carries the signal; if it's clipped at 255, fall back to green.
+  state.useGreen = R > 250 && G > 8;
+  const v = state.useGreen ? -G : -R;   // more blood -> less light, so invert
+
+  if (finger) {
+    state.pipe.push(t, v);
+    if (!state.locked && t - state.fingerSince > 2) { state.locked = true; lockCameraIfPossible(); }
+  }
+
+  if (state.recording) {
+    state.rec.frames.push([+(t - state.recStart).toFixed(4), +R.toFixed(3), +G.toFixed(3), +B.toFixed(3), finger ? 1 : 0]);
+    const el = t - state.recStart;
+    $("sTime").textContent = fmtTime(el);
+    if (state.recDur > 0 && el >= state.recDur) stopRecording();
+  }
+  state.lastT = t;
+}
+
+/* ---------- UI refresh ---------- */
+const wave = $("wave"), wctx = wave.getContext("2d");
+function sizeCanvas() { const r = wave.getBoundingClientRect(), dpr = window.devicePixelRatio || 1; wave.width = r.width * dpr; wave.height = r.height * dpr; }
+window.addEventListener("resize", sizeCanvas);
+
+function drawWave() {
+  const W = wave.width, H = wave.height; wctx.clearRect(0, 0, W, H);
+  const { y, t } = state.pipe.series(6);
+  wctx.strokeStyle = "#2a2d35"; wctx.lineWidth = 1;
+  for (let i = 1; i < 6; i++) { const x = W * i / 6; wctx.beginPath(); wctx.moveTo(x, 0); wctx.lineTo(x, H); wctx.stroke(); }
+  if (y.length < 10 || !state.finger) return;
+  let m = 1e-6; for (const v of y) m = Math.max(m, Math.abs(v));
+  const tEnd = t[t.length - 1], tStart = tEnd - 6;
+  const X = tt => (tt - tStart) / 6 * W, Y = v => H / 2 - v / m * H * 0.42;
+  wctx.strokeStyle = "#ff4d5e"; wctx.lineWidth = 2 * (window.devicePixelRatio || 1); wctx.lineJoin = "round";
+  wctx.beginPath(); for (let i = 0; i < y.length; i++) { const x = X(t[i]), yy = Y(y[i]); i ? wctx.lineTo(x, yy) : wctx.moveTo(x, yy); } wctx.stroke();
+  wctx.fillStyle = "#fff";
+  for (const p of state.pipe.peaks) {
+    if (p < tStart) continue;
+    let k = Math.round((p - t[0]) * FS); k = Math.max(0, Math.min(y.length - 1, k));
+    wctx.beginPath(); wctx.arc(X(p), Y(y[k]) - 8, 3 * (window.devicePixelRatio || 1), 0, 7); wctx.fill();
+  }
+}
+
+function fmtTime(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+
+function tick() {
+  if (state.stream) {
+    const fps = state.fpsWin.length > 1 ? (state.fpsWin.length - 1) / (state.fpsWin.at(-1) - state.fpsWin[0]) : 0;
+    $("fpsPill").textContent = fps ? fps.toFixed(0) + " fps" : "starting…";
+    const now = state.lastT || 0;
+    const ac = state.pipe.autocorr(8);
+    state.sqi = state.finger ? ac.sqi : 0;
+    const hrP = hrFromPeaks(state.pipe.peaks, now);
+    // Prefer beat-to-beat HR; if it disagrees badly with the autocorrelation estimate, trust neither.
+    let hr = hrP;
+    if (hrP && ac.bpm && Math.abs(hrP - ac.bpm) / ac.bpm > 0.2) hr = ac.sqi > 0.6 ? ac.bpm : null;
+    state.hr = state.finger && state.sqi > 0.3 ? hr : null;
+    $("bpm").textContent = state.hr ? Math.round(state.hr) : "--";
+    const q = Math.round(state.sqi * 100);
+    const qb = $("qbar"); qb.style.width = q + "%"; qb.style.background = q > 60 ? "var(--ok)" : q > 35 ? "var(--warn)" : "var(--accent)";
+    $("qtxt").textContent = state.finger ? q + "%" : "–";
+    if (!state.finger) setStatus(state.torchOn ? "Cover the back camera and flash with your fingertip." : "Place a fingertip over the camera with a light behind it.", "warn");
+    else if (now - state.fingerSince < 4) setStatus("Finger detected. Hold still…");
+    else if (q > 60) setStatus(state.recording ? "Recording. Good signal." : "Good signal. Ready to record.", "ok");
+    else if (q > 35) setStatus("Fair signal. Relax your hand, lighter pressure.", "warn");
+    else setStatus("Weak signal. Adjust finger to cover lens and flash.", "warn");
+    if (state.recording) $("sBeats").textContent = state.pipe.peaks.filter(p => p >= state.recStart).length;
+    drawWave();
+  }
+  requestAnimationFrame(tick);
+}
+
+state.pipe.onBeat = () => { const h = $("heart"); h.classList.add("beat"); setTimeout(() => h.classList.remove("beat"), 120); };
+
+/* ---------- recording & export ---------- */
+function startRecording() {
+  state.recDur = +$("dur").value;
+  state.recStart = state.lastT || 0;
+  const s = state.track ? state.track.getSettings() : {};
+  state.rec = {
+    format: "web-ppg/1",
+    started_at: new Date().toISOString(),
+    user_agent: navigator.userAgent,
+    camera: { label: state.track ? state.track.label : "", settings: s,
+              capabilities: state.track && state.track.getCapabilities ? state.track.getCapabilities() : {},
+              torch: state.torchOn, locked: state.lockedWith || [] },
+    columns: ["t_s", "r_mean", "g_mean", "b_mean", "finger"],
+    frames: [],
+  };
+  state.recording = true;
+  $("btnRec").textContent = "Stop"; $("btnRec").classList.add("recording");
+  $("exportPanel").classList.add("hidden");
+  requestWakeLock();
+}
+
+function stopRecording() {
+  if (!state.recording) return;
+  state.recording = false;
+  $("btnRec").textContent = "Record"; $("btnRec").classList.remove("recording");
+  const r = state.rec, t1 = state.lastT || 0;
+  r.duration_s = +(t1 - state.recStart).toFixed(3);
+  const ts = r.frames.map(f => f[0]);
+  r.mean_fps = ts.length > 1 ? +((ts.length - 1) / (ts.at(-1) - ts[0])).toFixed(2) : 0;
+  r.beats_s = state.pipe.peaks.filter(p => p >= state.recStart && p <= t1).map(p => +(p - state.recStart).toFixed(4));
+  r.ibi_ms = r.beats_s.slice(1).map((b, i) => +((b - r.beats_s[i]) * 1000).toFixed(1));
+  const hr = r.ibi_ms.length ? 60000 / (r.ibi_ms.reduce((a, b) => a + b, 0) / r.ibi_ms.length) : null;
+  r.summary = { mean_hr_bpm: hr ? +hr.toFixed(1) : null, rmssd_ms: (v => v ? +v.toFixed(1) : null)(rmssdFromPeaks(r.beats_s)),
+                finger_fraction: r.frames.length ? +(r.frames.filter(f => f[4]).length / r.frames.length).toFixed(3) : 0 };
+  state.last = r;
+  try { localStorage.setItem("webppg:last", JSON.stringify(r)); } catch (e) {}
+  showExport(r);
+  releaseWakeLock();
+}
+
+function showExport(r) {
+  $("exportPanel").classList.remove("hidden");
+  const s = r.summary;
+  $("exportSummary").innerHTML = `<b style="color:var(--text)">${fmtTime(r.duration_s)} recorded</b> · ${r.frames.length} frames @ ${r.mean_fps} fps · ${r.beats_s.length} beats` +
+    (s.mean_hr_bpm ? ` · ${s.mean_hr_bpm} bpm avg` : "") + (s.rmssd_ms ? ` · RMSSD ${s.rmssd_ms} ms` : "") +
+    (s.finger_fraction < 0.95 ? `<br><span style="color:var(--warn)">Finger off the lens for ${Math.round((1 - s.finger_fraction) * 100)}% of frames.</span>` : "");
+  $("sRmssd").textContent = s.rmssd_ms ? Math.round(s.rmssd_ms) : "–";
+  $("sBeats").textContent = r.beats_s.length;
+}
+
+function toCSV(r) { return r.columns.join(",") + "\n" + r.frames.map(f => f.join(",")).join("\n") + "\n"; }
+function fname(ext) { return "ppg_" + state.last.started_at.replace(/[:.]/g, "-").slice(0, 19) + "." + ext; }
+function download(text, name, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+$("btnCsv").onclick = () => download(toCSV(state.last), fname("csv"), "text/csv");
+$("btnJson").onclick = () => download(JSON.stringify(state.last), fname("json"), "application/json");
+$("btnCopy").onclick = async () => { try { await navigator.clipboard.writeText(toCSV(state.last)); toast("CSV copied"); } catch (e) { toast("Copy failed"); } };
+$("btnShare").onclick = async () => {
+  const files = [new File([toCSV(state.last)], fname("csv"), { type: "text/csv" }),
+                 new File([JSON.stringify(state.last)], fname("json"), { type: "application/json" })];
+  try {
+    if (navigator.canShare && navigator.canShare({ files })) await navigator.share({ files, title: "PPG recording" });
+    else { download(JSON.stringify(state.last), fname("json"), "application/json"); }
+  } catch (e) { if (e.name !== "AbortError") toast("Share failed"); }
+};
+try { $("endpoint").value = localStorage.getItem("webppg:endpoint") || ""; } catch (e) {}
+$("btnPost").onclick = async () => {
+  const url = $("endpoint").value.trim(); if (!url) return toast("Enter a URL first");
+  try { localStorage.setItem("webppg:endpoint", url); } catch (e) {}
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state.last) });
+    toast(res.ok ? "Sent ✓" : "Server said " + res.status);
+  } catch (e) { toast("Send failed (CORS or network)"); }
+};
+
+/* ---------- wake lock ---------- */
+let wakeLock = null;
+async function requestWakeLock() { try { wakeLock = await navigator.wakeLock?.request("screen"); } catch (e) {} }
+function releaseWakeLock() { try { wakeLock && wakeLock.release(); } catch (e) {} wakeLock = null; }
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && state.recording) { stopRecording(); toast("Recording stopped: app went to background"); }
+  if (!document.hidden && state.stream) setTorch(state.torchOn);
+});
+
+/* ---------- diagnostics ---------- */
+function updateDiag() {
+  const tr = state.track; if (!tr) return;
+  $("diag").textContent = JSON.stringify({
+    label: tr.label, settings: tr.getSettings(), capabilities: tr.getCapabilities ? tr.getCapabilities() : "n/a",
+    torchOn: state.torchOn, lockedWith: state.lockedWith || [], channel: state.useGreen ? "green" : "red",
+    rVFC: "requestVideoFrameCallback" in HTMLVideoElement.prototype, secureContext: window.isSecureContext,
+  }, null, 2);
+}
+
+/* ---------- buttons ---------- */
+$("btnStart").onclick = async () => {
+  if (state.stream) { if (state.recording) stopRecording(); await setTorch(false); stopCamera(); $("btnStart").textContent = "Start camera";
+    $("btnRec").disabled = $("btnTorch").disabled = true; $("fpsPill").textContent = "idle"; setStatus("Stopped."); return; }
+  if (!DEMO && !(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+    setStatus(window.isSecureContext ? "This browser has no camera API." : "Camera needs HTTPS. Open this page from an https:// address.", "err"); return;
+  }
+  try {
+    setStatus("Opening camera…");
+    await openCamera(null);
+    if (!DEMO) {
+      // After permission, labels are visible: switch to the physical wide lens if we're on a virtual multi-lens device.
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const wide = pickBackWide(devs);
+      if (wide && wide.deviceId !== state.track.getSettings().deviceId) await openCamera(wide.deviceId);
+      await listCameras();
+    }
+    sizeCanvas(); state.t0 = 0; state.pipe.reset(); scheduleFrame();
+    $("btnStart").textContent = "Stop camera"; $("btnRec").disabled = false; $("btnTorch").disabled = false;
+    updateDiag();
+  } catch (e) {
+    setStatus((e.name === "NotAllowedError" ? "Camera permission denied. Allow it in Settings → Safari → Camera." : "Camera error: " + e.message), "err");
+  }
+};
+$("btnTorch").onclick = () => setTorch(!state.torchOn);
+$("btnRec").onclick = () => state.recording ? stopRecording() : startRecording();
+$("cam").onchange = async e => { try { await openCamera(e.target.value); state.pipe.reset(); scheduleFrame(); updateDiag(); } catch (err) { setStatus("Couldn't switch camera: " + err.message, "err"); } };
+
+// Restore the last recording so it can still be exported after a reload.
+try { const last = JSON.parse(localStorage.getItem("webppg:last") || "null"); if (last && last.frames) { state.last = last; showExport(last); } } catch (e) {}
+if (DEMO) $("fpsPill").textContent = "demo";
+sizeCanvas();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
